@@ -1,9 +1,9 @@
 import setuptools
 setuptools.setup(     
-     name="rag-module",     
+     name="rag-test-module",     
      version="0.0.1",
      python_requires=">=3.11",   
-     packages=["rag_pkg"],
+     packages=["judge_qna_handler"],
      install_requires=[
          "flask>=3.0"
      ]
