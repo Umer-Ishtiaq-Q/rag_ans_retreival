@@ -1,60 +1,251 @@
 from flask import Flask, request, jsonify
 
-def get_rag_response_function(get_query_function):
-    def endpoint_function():
+class JudgeQnaHandler:
+    """
+    A JudgeQnaHandler object represents a Flask endpoint to retrieve the answer to a question using the
+    specified bot function. The endpoint is created programmatically using the create_testing_rag_endpoint method.
+
+    Attributes:
+    - route: The URL route (string) to the endpoint.
+    """
+
+    def __init__(self, history_accepted:bool = False, route:str = '/get_rag_response'):
         """
-        Handles HTTP requests to the RAG endpoint and returns a response.
+        Initializes a JudgeQnaHandler object.
 
-        Expects a JSON payload containing a 'question' field.
-        Returns a dictionary with the 'answer' to the question.
+        Parameters:
+        - route: The URL route (string) to the endpoint.
         """
-        # Retrieve JSON payload from the request
-        data = request.get_json()
+        self.route = route
+        self.history_accepted = history_accepted
 
-        # Extract the 'question' from the payload, defaulting to an empty string if not present
-        question = data.get('question', "")
-
-        # If no question is provided, return an error message
-        if not question:
-            return jsonify({"error": "No question provided."}), 400
-
-        try:
-            # Obtain the answer by calling get_query_function with the provided question
-            answer = get_query_function(question)
-        except Exception as e:
-            print("Error: ", e)
-            return jsonify({"error": "An error occurred"}), 500
-
-        # Return the answer within a dictionary
-        return jsonify({
-            "answer": answer
-        })
+    def __str__(self):
+        return f"JudgeQnaHandler(route={self.route})"
     
-    return endpoint_function
+    def create_rag_response_endpoint(self, app, get_query_response, methods=["POST"]):
+        """
+        Adds a new endpoint to the Flask app programmatically.
 
-def create_testing_rag_endpoint(app, get_query_response, route='/get_rag_response', methods=["POST"]):
-    """
-    Adds a new endpoint to the Flask app programmatically.
+        Parameters:
+        - app: Flask app object.
+        - get_query_response: The function to get the query response.
+        - methods: List of HTTP methods (default is ["POST"]).
 
-    Parameters:
-    - app: Flask app object
-    - get_query_response: The function to get the query response
-    - route: The URL route (string)
-    - methods: List of HTTP methods (default is ["POST"])
-    """
-    # Pass get_query_response to get_rag_response_function
-    endpoint_function = get_rag_response_function(get_query_response)
-    app.add_url_rule(route, view_func=endpoint_function, methods=methods)
+        Endpoint can recieve below json payloads
 
-# Example usage
-# app = Flask(__name__)
+        Expects a JSON payload containing either a 'questions' list, a 'question' string or a 'presets' dictionary.
 
-def sample_get_query_response(question):
-    # Simulate processing the question
-    return f"Processed question: {question}"
+        1) If a 'questions' list is provided, each question entry should have the following structure:
+        {
+            "id": <string>,  # Unique identifier for the question
+            "question": <string>  # The question to be answered
+        }
+        Output:
+        Returns a dictionary with 'answer' key containing a list of answers corresponding to the questions if a 'questions' list is provided.
+        {
+            "answer": [
+                {
+                    "id": <string>,  # Unique identifier for the question
+                    "answer": <string>  # The answer to the question
+                },
+                ...
+        ]}
 
-# Create the endpoint dynamically
-# create_testing_rag_endpoint(app, sample_get_query_response)
+        2) If a 'question' string is provided, it will be answered directly.
+        {
+            "question": <string>  # The question to be answered
+        }
+        Output:
+        Returns a dictionary with a 'answer' key containing a single answer if a 'question' string is provided.
+        {
+            "answer": <string>  # The answer to the question
+        }
 
-# if __name__ == '__main__':
-#     app.run()
+        3) If a 'presets' dictionary is provided, it should contain a 'history_accepted' boolean to toggle the history acceptance.
+        {
+            "presets": {
+                "history_accepted": <boolean>
+            }
+        }
+        Returns a dictionary with 'response' and 'message' keys containing success message.
+        Output:
+        {
+            "response": "Sucess",
+            "message" : "History accepted: <boolean>"   
+        }
+
+        Returns:
+        {"error": <string>}
+        """
+        endpoint_function = self.get_rag_response_function(get_query_response)
+        app.add_url_rule(self.route, view_func=endpoint_function, methods=methods)
+
+    def handle_qestions_list(self, questions_list: list, get_query_response):
+        """
+        Handles a list of questions and returns a list of answers.
+
+        Parameters:
+        - questions_list: A list of question dictionaries.
+
+        Returns:
+        - A list of answer dictionaries.
+        """
+        answers_list = []
+        for question in questions_list:
+            try:
+                answer = get_query_response(question["question"])
+                answers_list.append({
+                    "id": question["id"],
+                    "answer": answer
+                })
+            except Exception as e:
+                print(f"Error for question {question}: ", e)
+
+        return answers_list
+
+    def handle_qestion(self, question: str, get_query_response):
+        """
+        Handles a single question and returns an answer.
+
+        Parameters:
+        - question: The question to be answered (string).
+        - get_query_response: A function that takes a question (string) and returns an answer (string).
+
+        Returns:
+        - The answer to the question (string).
+        """
+        try:
+            answer = get_query_response(question)
+        except Exception as e:
+            print(f"Error for question {question}: ", e)
+            return "An error occurred while processing the question."
+        return answer
+
+    def get_rag_response_function(self, get_query_function):
+        """
+        Returns a function that handles HTTP requests to the RAG endpoint and returns a response.
+
+        Parameters:
+        - get_query_function: The function to get the query response.
+        """
+        def endpoint_function():
+            """
+            Handles HTTP requests to the RAG endpoint and returns a response.
+
+            Expects a JSON payload containing either a 'questions' list, a 'question' string or a 'presets' dictionary.
+
+            1) If a 'questions' list is provided, each question entry should have the following structure:
+            {
+                "id": <string>,  # Unique identifier for the question
+                "question": <string>  # The question to be answered
+            }
+            Output:
+            Returns a dictionary with 'answer' key containing a list of answers corresponding to the questions if a 'questions' list is provided.
+            {
+                "answer": [
+                    {
+                        "id": <string>,  # Unique identifier for the question
+                        "answer": <string>  # The answer to the question
+                    },
+                    ...
+            ]}
+
+            2) If a 'question' string is provided, it will be answered directly.
+            {
+                "question": <string>  # The question to be answered
+            }
+            Output:
+            Returns a dictionary with a 'answer' key containing a single answer if a 'question' string is provided.
+            {
+                "answer": <string>  # The answer to the question
+            }
+
+            3) If a 'presets' dictionary is provided, it should contain a 'history_accepted' boolean to toggle the history acceptance.
+            {
+                "presets": {
+                    "history_accepted": <boolean>
+                }
+            }
+            Returns a dictionary with 'response' and 'message' keys containing success message.
+            Output:
+            {
+                "response": "Sucess",
+                "message" : "History accepted: <boolean>"   
+            }
+
+            Returns:
+            {"error": <string>}
+
+            """
+            try:
+                data = request.get_json()
+                
+                # Check if the request contains a 'questions' list
+                if "questions" in data:
+                    questions_list = data.get('questions', [])
+
+                    if "chat_history" in data and not self.history_accepted:
+                        return jsonify({"error": "History is not accepted"}), 400
+
+                    # Handle the list of questions
+                    answers_list = self.handle_qestions_list(questions_list, get_query_function)
+                    
+                    # Return the answers as a JSON response
+                    return jsonify({
+                        "answer": answers_list
+                    })
+
+                # Check if the request contains a 'question' string
+                elif "question" in data:
+                    question = data.get('question', "")
+
+                    if "chat_history" in data and not self.history_accepted:
+                        return jsonify({"error": "History is not accepted"}), 400
+                    
+                    # Handle the single question
+                    answer = self.handle_qestion(question, get_query_function)
+
+                    # Return the answer as a JSON response
+                    return jsonify({
+                        "answer": answer
+                    })
+
+                # Check if the request contains a 'presets' dictionary
+                elif "presets" in data:
+                    presets_data = data.get('presets', {})
+                    history_accepted = presets_data.get('history_accepted', "")
+
+                    # Update the history acceptance status if the 'history_accepted' parameter is present
+                    if history_accepted != "":
+                        self.history_accepted = history_accepted
+                    
+                    # Return a success message as a JSON response
+                    return jsonify({
+                        "response": "Sucessfully updated",
+                        "message" : f"History accepted: {self.history_accepted}"
+                    })
+
+                # If none of the above conditions are met, return an error message
+                else:
+                    return jsonify({"error": "Missing parameter."}), 400
+
+            except Exception as e:  
+                print(f"Error in {self.route}: ", e)
+                return jsonify({"error": f"Error occured while processing the request"}), 500
+        return endpoint_function
+
+# # Example usage
+# if __name__ == "__main__":
+#     # app object
+#     app = Flask(__name__)
+
+#     # temp anonymous function
+#     get_query_response = lambda x: x
+
+#     # Endpoint handler class
+#     handler = JudgeQnaHandler()
+#     handler.create_rag_response_endpoint(app, get_query_response)
+    
+#     # local dev server
+#     app.run(host="0.0.0.0", port=5000, use_reloader=True)
+    
